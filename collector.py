@@ -69,6 +69,20 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS vod_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title_no TEXT,
+                broad_no TEXT,
+                streamer_id TEXT,
+                streamer_nick TEXT,
+                broad_title TEXT,
+                chat_count INTEGER DEFAULT 0,
+                broad_start TEXT,
+                last_chat_time TEXT,
+                created_at TEXT
+            )
+        """)
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_chats_streamer ON chats(streamer_id)
         """)
         conn.execute("""
@@ -288,22 +302,17 @@ async def import_vod_chat(title_no: int, max_chunks: Optional[int] = None) -> Di
         last_chat_time = all_chats_to_insert[-1][5]
 
         conn.execute("""
-            INSERT INTO channels (streamer_id, streamer_nick, broad_no, broad_title, status, started_at, last_chat_at)
-            VALUES (?, ?, ?, ?, 'vod_imported', ?, ?)
-            ON CONFLICT(streamer_id) DO UPDATE SET
-                streamer_nick = excluded.streamer_nick,
-                broad_no = excluded.broad_no,
-                broad_title = excluded.broad_title,
-                last_chat_at = CASE 
-                    WHEN channels.last_chat_at IS NULL THEN excluded.last_chat_at
-                    WHEN channels.last_chat_at < excluded.last_chat_at THEN excluded.last_chat_at
-                    ELSE channels.last_chat_at 
-                END
-        """, (streamer_id, streamer_nick, broad_no, broad_title, first_chat_time, last_chat_time))
+            INSERT INTO vod_records (title_no, broad_no, streamer_id, streamer_nick, broad_title, chat_count, broad_start, last_chat_time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        """, (str(title_no), broad_no, streamer_id, streamer_nick, broad_title, len(all_chats_to_insert), broad_start_dt.strftime('%Y-%m-%d %H:%M:%S'), all_chats_to_insert[-1][5]))
+        cur = conn.cursor()
+        cur.execute("SELECT last_insert_rowid()")
+        vod_id = cur.fetchone()[0]
     conn.close()
 
     return {
         "success": True,
+        "vod_id": vod_id,
         "streamer_id": streamer_id,
         "streamer_nick": streamer_nick,
         "broad_title": broad_title,
@@ -362,17 +371,21 @@ def parse_uploaded_chat_log(content_str: str, default_streamer_id: str = "import
         """, parsed_chats)
 
         conn.execute("""
-            INSERT INTO channels (streamer_id, streamer_nick, broad_no, broad_title, status, started_at, last_chat_at)
-            VALUES (?, ?, 'upload', ?, 'upload_imported', ?, ?)
-            ON CONFLICT(streamer_id) DO UPDATE SET
-                broad_title = excluded.broad_title,
-                last_chat_at = excluded.last_chat_at
-        """, (default_streamer_id, default_streamer_id, default_title, parsed_chats[0][5], parsed_chats[-1][5]))
+            INSERT INTO vod_records (title_no, broad_no, streamer_id, streamer_nick, broad_title, chat_count, broad_start, last_chat_time, created_at)
+            VALUES ('upload', 'upload', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        """, (default_streamer_id, default_streamer_id, default_title, len(parsed_chats), parsed_chats[0][5], parsed_chats[-1][5]))
+        cur = conn.cursor()
+        cur.execute("SELECT last_insert_rowid()")
+        vod_id = cur.fetchone()[0]
     conn.close()
 
     return {
         "success": True,
+        "vod_id": vod_id,
         "streamer_id": default_streamer_id,
+        "streamer_nick": default_streamer_id,
+        "broad_title": default_title,
+        "broad_no": "upload",
         "chats_imported": len(parsed_chats),
         "first_chat": parsed_chats[0][5],
         "last_chat": parsed_chats[-1][5]

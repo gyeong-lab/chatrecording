@@ -9,6 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadChannels();
     loadChats();
     loadMonitoredStreamers();
+    loadVodList();
     startPolling();
 });
 
@@ -36,6 +37,8 @@ function switchTab(tabName) {
         loadSummary();
     } else if (tabName === "monitor") {
         loadMonitoredStreamers();
+    } else if (tabName === "vod") {
+        loadVodList();
     }
 }
 
@@ -506,7 +509,206 @@ async function deleteMonitoredStreamer(streamerId) {
     }
 }
 
-// ==================== [과거 다시보기(VOD) 채팅 복원 기능 (방법 2)] ====================
+// ==================== [과거 다시보기(VOD) 채팅 복원 및 전용 뷰어 & 저장] ====================
+
+let currentVodId = null;
+let currentVodMeta = null;
+let vodChatsList = [];
+let vodSortOrder = "asc"; // "asc" (시간순/과거순) or "desc" (최신순)
+let vodFilterTimer = null;
+
+// VOD 복원 목록 불러오기
+async function loadVodList(selectId = null) {
+    try {
+        const res = await fetch("/api/vod/list");
+        const data = await res.json();
+        const vods = data.vods || [];
+        const dropdown = document.getElementById("vodSelectDropdown");
+        if (!dropdown) return;
+
+        let optionsHtml = '<option value="">복원된 VOD를 선택하세요 (' + vods.length + '개)</option>';
+        vods.forEach(v => {
+            const countStr = (v.actual_chats || v.chat_count || 0).toLocaleString();
+            const dateStr = v.broad_start ? v.broad_start.split(" ")[0] : "";
+            const isSelected = (selectId && selectId == v.id) || (!selectId && currentVodId == v.id);
+            optionsHtml += `<option value="${v.id}" ${isSelected ? 'selected' : ''}>
+                [${escapeHtml(v.streamer_nick || v.streamer_id)}] ${escapeHtml(v.broad_title || '방송')} (${countStr}건) ${dateStr}
+            </option>`;
+        });
+        dropdown.innerHTML = optionsHtml;
+
+        if (selectId) {
+            currentVodId = selectId;
+            dropdown.value = selectId;
+            await loadVodChats(selectId);
+        } else if (!currentVodId && vods.length > 0) {
+            currentVodId = vods[0].id;
+            dropdown.value = vods[0].id;
+            await loadVodChats(vods[0].id);
+        } else if (currentVodId) {
+            await loadVodChats(currentVodId);
+        }
+    } catch (e) {
+        console.error("VOD 목록 로드 실패:", e);
+    }
+}
+
+// 드롭다운 변경 시 VOD 채팅 로드
+function onSelectVodChange(vodId) {
+    if (!vodId) return;
+    currentVodId = parseInt(vodId);
+    loadVodChats(currentVodId);
+}
+
+// 특정 VOD의 전체 채팅 불러오기
+async function loadVodChats(vodId) {
+    if (!vodId) return;
+    const container = document.getElementById("vodChatScrollContainer");
+    if (container) {
+        container.innerHTML = `
+            <div class="h-full flex flex-col items-center justify-center text-slate-400 space-y-2">
+                <span class="animate-spin text-2xl">⏳</span>
+                <p class="text-xs">복원된 VOD 채팅을 불러오는 중입니다...</p>
+            </div>
+        `;
+    }
+
+    try {
+        const res = await fetch(`/api/vod/chats?vod_id=${vodId}&order=${vodSortOrder}&limit=10000`);
+        const data = await res.json();
+
+        currentVodMeta = data.vod;
+        vodChatsList = data.chats || [];
+
+        // 메타 배지 업데이트
+        if (currentVodMeta) {
+            document.getElementById("vodMetaStreamer").innerText = `${currentVodMeta.streamer_nick || currentVodMeta.streamer_id} (${currentVodMeta.streamer_id})`;
+            document.getElementById("vodMetaTitle").innerText = currentVodMeta.broad_title || "-";
+            document.getElementById("vodMetaStart").innerText = currentVodMeta.broad_start || "-";
+            document.getElementById("vodMetaImportedAt").innerText = currentVodMeta.created_at || "-";
+        }
+        document.getElementById("vodViewerCountBadge").innerText = `총 ${vodChatsList.length.toLocaleString()}건`;
+
+        renderVodChats();
+    } catch (e) {
+        console.error("VOD 채팅 로드 오류:", e);
+        if (container) {
+            container.innerHTML = `<div class="p-4 text-center text-xs text-rose-400">채팅 로드 중 오류가 발생했습니다.</div>`;
+        }
+    }
+}
+
+// VOD 채팅 화면 렌더링 (검색 필터 적용)
+function renderVodChats() {
+    const container = document.getElementById("vodChatScrollContainer");
+    if (!container) return;
+
+    const kw = (document.getElementById("vodSearchKeyword")?.value || "").trim().toLowerCase();
+    const userKw = (document.getElementById("vodSearchUser")?.value || "").trim().toLowerCase();
+
+    let filtered = vodChatsList;
+    if (kw) {
+        filtered = filtered.filter(c => (c.message || "").toLowerCase().includes(kw));
+    }
+    if (userKw) {
+        filtered = filtered.filter(c => 
+            (c.user_nick || "").toLowerCase().includes(userKw) || 
+            (c.user_id || "").toLowerCase().includes(userKw)
+        );
+    }
+
+    document.getElementById("vodViewerCountBadge").innerText = `총 ${filtered.length.toLocaleString()}건 / 전체 ${vodChatsList.length.toLocaleString()}건`;
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
+                <i data-lucide="message-square-off" class="w-10 h-10 text-slate-600"></i>
+                <p class="text-sm">${vodChatsList.length === 0 ? '저장된 채팅이 없습니다.' : '검색 조건에 맞는 채팅이 없습니다.'}</p>
+            </div>
+        `;
+        lucide.createIcons();
+        return;
+    }
+
+    let html = "";
+    filtered.forEach(c => {
+        const timeStr = (c.created_at || "").split(" ")[1] || c.created_at || "";
+        html += `
+            <div class="group flex items-start gap-3 p-2 rounded-xl hover:bg-slate-800/60 transition-all border border-transparent hover:border-slate-800">
+                <span class="text-[11px] font-mono text-slate-500 shrink-0 mt-0.5">${timeStr}</span>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-0.5">
+                        <button onclick="quickSearchUser('${escapeHtml(c.user_id || '')}')" class="text-xs font-bold text-amber-400 hover:text-amber-300 hover:underline">
+                            ${escapeHtml(c.user_nick || c.user_id)}
+                        </button>
+                        <span class="text-[10px] text-slate-500">(${escapeHtml(c.user_id || '')})</span>
+                    </div>
+                    <div class="text-xs text-slate-200 break-words leading-relaxed select-text">${escapeHtml(c.message || '')}</div>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+// 검색 디바운스
+function debounceFilterVodChats() {
+    clearTimeout(vodFilterTimer);
+    vodFilterTimer = setTimeout(() => {
+        renderVodChats();
+    }, 200);
+}
+
+// 시간순 / 최신순 정렬 토글
+function toggleVodSortOrder() {
+    vodSortOrder = (vodSortOrder === "asc") ? "desc" : "asc";
+    const label = document.getElementById("vodSortLabel");
+    if (label) {
+        label.innerText = (vodSortOrder === "asc") ? "시간순(과거순)" : "최신순";
+    }
+    if (currentVodId) {
+        loadVodChats(currentVodId);
+    }
+}
+
+// VOD 파일로 저장 (TXT / CSV / JSON)
+function exportCurrentVod(format = "txt") {
+    if (!currentVodId) {
+        alert("먼저 저장할 VOD를 선택하거나 복원해주세요!");
+        return;
+    }
+    const downloadUrl = `/api/vod/export?vod_id=${currentVodId}&format=${format}`;
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.setAttribute("download", "");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+// VOD 복원 내역 삭제
+async function deleteCurrentVod() {
+    if (!currentVodId) {
+        alert("삭제할 VOD가 선택되지 않았습니다.");
+        return;
+    }
+    if (!confirm("현재 선택된 VOD 복원 내역 및 관련 채팅 데이터를 정말 삭제하시겠습니까?")) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/vod/delete?vod_id=${currentVodId}`, {
+            method: "DELETE"
+        });
+        const data = await res.json();
+        alert(data.message || "삭제되었습니다.");
+        currentVodId = null;
+        loadVodList();
+    } catch (e) {
+        alert("삭제 중 오류가 발생했습니다.");
+    }
+}
 
 // VOD URL로 과거 채팅 복원
 async function importVodChat() {
@@ -537,16 +739,26 @@ async function importVodChat() {
 
         const data = result.data;
         const resultBox = document.getElementById("vodResultBox");
-        resultBox.classList.remove("hidden");
-        document.getElementById("vodResultTitle").innerText = `복원 성공! 총 ${data.chats_imported.toLocaleString()}건 저장 완료`;
-        document.getElementById("vodResultDesc").innerText = 
-            `스트리머: ${data.streamer_nick}(${data.streamer_id}) | 제목: ${data.broad_title} | 방송시간: ${data.broad_start}`;
+        if (resultBox) {
+            resultBox.classList.remove("hidden");
+            document.getElementById("vodResultTitle").innerText = `🎉 복원 성공! 총 ${data.chats_imported.toLocaleString()}건 저장 완료`;
+            document.getElementById("vodResultDesc").innerText = 
+                `스트리머: ${data.streamer_nick}(${data.streamer_id}) | 제목: ${data.broad_title} | 방송일시: ${data.broad_start}`;
+        }
 
-        alert(result.message);
+        // 즉시 알림창 표시
+        alert(`✅ [${data.streamer_nick}] 다시보기 채팅 총 ${data.chats_imported.toLocaleString()}건이 성공적으로 복원되었습니다!\n아래 [복원된 VOD 채팅 뷰어]에서 바로 확인하고 파일로 저장할 수 있습니다.`);
+
         input.value = "";
-        currentStreamerId = data.streamer_id;
-        loadChannels();
-        loadChats(true);
+        
+        // VOD 복원 전용 뷰어에 즉시 표시
+        await loadVodList(data.vod_id);
+
+        // 뷰어 위치로 부드럽게 스크롤
+        const viewerCard = document.getElementById("vodViewerCard");
+        if (viewerCard) {
+            viewerCard.scrollIntoView({ behavior: 'smooth' });
+        }
 
     } catch (e) {
         alert("복원 요청 중 오류가 발생했습니다.");
@@ -581,10 +793,16 @@ async function uploadChatLogFile() {
             alert(result.detail || "파일 처리 실패");
             return;
         }
-        alert(result.message);
+
+        const data = result.data;
+        alert(`✅ 파일에서 채팅 총 ${data.chats_imported.toLocaleString()}건을 성공적으로 복원했습니다!\n아래 [복원된 VOD 채팅 뷰어]에서 확인 및 저장할 수 있습니다.`);
         fileInput.value = "";
-        loadChannels();
-        loadChats(true);
+
+        await loadVodList(data.vod_id);
+        const viewerCard = document.getElementById("vodViewerCard");
+        if (viewerCard) {
+            viewerCard.scrollIntoView({ behavior: 'smooth' });
+        }
     } catch (e) {
         alert("파일 업로드 중 오류 발생");
     }

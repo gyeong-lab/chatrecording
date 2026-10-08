@@ -5,11 +5,15 @@ import re
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import sqlite3
+import urllib.parse
+import datetime
+import io
+import csv
 
 from collector import (
     get_db,
@@ -318,6 +322,218 @@ async def upload_chat_file(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"파일 파싱 오류: {str(e)}")
+
+@app.get("/api/vod/list")
+async def list_vod_records():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT v.*,
+               (SELECT COUNT(*) FROM chats WHERE chats.streamer_id = v.streamer_id AND (chats.broad_no = v.broad_no OR v.broad_no = 'upload')) as actual_chats
+        FROM vod_records v
+        ORDER BY v.id DESC
+    """)
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"vods": rows}
+
+@app.get("/api/vod/chats")
+async def get_vod_chats(
+    vod_id: Optional[int] = None,
+    streamer_id: Optional[str] = None,
+    broad_no: Optional[str] = None,
+    query: Optional[str] = None,
+    user_search: Optional[str] = None,
+    order: str = "asc",
+    limit: int = 1000,
+    offset: int = 0
+):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    sid = streamer_id
+    bno = broad_no
+    vod_meta = None
+
+    if vod_id:
+        cursor.execute("SELECT * FROM vod_records WHERE id = ?", (vod_id,))
+        row = cursor.fetchone()
+        if row:
+            vod_meta = dict(row)
+            sid = vod_meta["streamer_id"]
+            bno = vod_meta["broad_no"]
+
+    conditions = []
+    params = []
+
+    if sid:
+        conditions.append("streamer_id = ?")
+        params.append(sid)
+
+    if bno and bno != "upload":
+        conditions.append("broad_no = ?")
+        params.append(bno)
+
+    if query:
+        conditions.append("message LIKE ?")
+        params.append(f"%{query}%")
+
+    if user_search:
+        conditions.append("(user_id LIKE ? OR user_nick LIKE ?)")
+        params.extend([f"%{user_search}%", f"%{user_search}%"])
+
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    count_sql = f"SELECT COUNT(*) FROM chats {where_clause}"
+    cursor.execute(count_sql, params)
+    total_count = cursor.fetchone()[0]
+
+    sort_direction = "ASC" if order.lower() == "asc" else "DESC"
+    sql = f"""
+        SELECT * FROM chats
+        {where_clause}
+        ORDER BY created_at {sort_direction}, id {sort_direction}
+        LIMIT ? OFFSET ?
+    """
+    cursor.execute(sql, params + [limit, offset])
+    chats = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return {
+        "vod": vod_meta,
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+        "chats": chats
+    }
+
+@app.get("/api/vod/export")
+async def export_vod_chats(
+    vod_id: Optional[int] = None,
+    streamer_id: Optional[str] = None,
+    broad_no: Optional[str] = None,
+    format: str = "txt"
+):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    sid = streamer_id
+    bno = broad_no
+    title = "SOOP_VOD_CHAT"
+    nick = "스트리머"
+    broad_start = ""
+
+    if vod_id:
+        cursor.execute("SELECT * FROM vod_records WHERE id = ?", (vod_id,))
+        row = cursor.fetchone()
+        if row:
+            r = dict(row)
+            sid = r["streamer_id"]
+            bno = r["broad_no"]
+            title = r["broad_title"] or title
+            nick = r["streamer_nick"] or sid
+            broad_start = r["broad_start"] or ""
+
+    conditions = []
+    params = []
+    if sid:
+        conditions.append("streamer_id = ?")
+        params.append(sid)
+    if bno and bno != "upload":
+        conditions.append("broad_no = ?")
+        params.append(bno)
+
+    where_clause = ""
+    if conditions:
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+    sql = f"SELECT * FROM chats {where_clause} ORDER BY created_at ASC, id ASC"
+    cursor.execute(sql, params)
+    chats = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    safe_title = re.sub(r'[\\/*?:"<>|]', '_', title)[:30]
+    safe_nick = re.sub(r'[\\/*?:"<>|]', '_', nick)[:20]
+    safe_date = (broad_start.split(' ')[0] if broad_start else datetime.datetime.now().strftime('%Y%m%d')).replace('-', '')
+    filename_base = f"SOOP_VOD_{safe_nick}_{safe_title}_{safe_date}"
+
+    if format.lower() == "csv":
+        output = io.StringIO()
+        output.write('\ufeff')
+        writer = csv.writer(output)
+        writer.writerow(["시간", "스트리머ID", "방송번호", "시청자ID", "시청자닉네임", "채팅내용"])
+        for c in chats:
+            writer.writerow([c.get("created_at", ""), c.get("streamer_id", ""), c.get("broad_no", ""), c.get("user_id", ""), c.get("user_nick", ""), c.get("message", "")])
+
+        filename = f"{filename_base}.csv"
+        quoted_filename = urllib.parse.quote(filename)
+        return Response(
+            content=output.getvalue().encode('utf-8-sig'),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=\"{quoted_filename}\"; filename*=UTF-8''{quoted_filename}"}
+        )
+
+    elif format.lower() == "json":
+        data = {
+            "title": title,
+            "streamer_id": sid,
+            "streamer_nick": nick,
+            "broad_start": broad_start,
+            "total_chats": len(chats),
+            "chats": chats
+        }
+        filename = f"{filename_base}.json"
+        quoted_filename = urllib.parse.quote(filename)
+        return Response(
+            content=json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'),
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=\"{quoted_filename}\"; filename*=UTF-8''{quoted_filename}"}
+        )
+
+    else:
+        lines = [
+            "=" * 65,
+            f"  SOOP VOD 채팅 복원 기록",
+            f"  방송 제목 : {title}",
+            f"  스트리머  : {nick} ({sid})",
+            f"  방송 일시 : {broad_start}",
+            f"  총 채팅 수: {len(chats):,}건",
+            f"  출력 일시 : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "=" * 65,
+            ""
+        ]
+        for c in chats:
+            lines.append(f"[{c.get('created_at', '')}] {c.get('user_nick', '')}({c.get('user_id', '')}): {c.get('message', '')}")
+
+        content_txt = "\n".join(lines)
+        filename = f"{filename_base}.txt"
+        quoted_filename = urllib.parse.quote(filename)
+        return Response(
+            content=content_txt.encode('utf-8'),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=\"{quoted_filename}\"; filename*=UTF-8''{quoted_filename}"}
+        )
+
+@app.delete("/api/vod/delete")
+async def delete_vod_record(vod_id: int):
+    conn = get_db()
+    with conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM vod_records WHERE id = ?", (vod_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="해당 VOD 기록을 찾을 수 없습니다.")
+        r = dict(row)
+        cursor.execute("DELETE FROM vod_records WHERE id = ?", (vod_id,))
+        if r["broad_no"] and r["broad_no"] != "upload":
+            cursor.execute("DELETE FROM chats WHERE streamer_id = ? AND broad_no = ?", (r["streamer_id"], r["broad_no"]))
+        elif r["broad_no"] == "upload":
+            cursor.execute("DELETE FROM chats WHERE streamer_id = ? AND broad_no = 'upload'", (r["streamer_id"],))
+    conn.close()
+    return {"status": "success", "message": f"'{r['broad_title']}' VOD 내역이 삭제되었습니다."}
 
 # ==================== [채팅 조회, 시청자 검색, 요약 API] ====================
 

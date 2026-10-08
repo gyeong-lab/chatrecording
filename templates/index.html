@@ -283,6 +283,95 @@
                     </button>
                 </div>
             </div>
+
+            <!-- ==================== 복원된 과거 VOD 채팅 전용 뷰어 & 저장 ==================== -->
+            <div id="vodViewerCard" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+                <!-- 상단 타이틀 & VOD 선택 & 파일 저장 버튼 바 -->
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                                복원된 VOD 채팅 뷰어 및 파일 저장
+                            </h3>
+                            <span id="vodViewerCountBadge" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                0건
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-400">복원된 다시보기 채팅을 실시간 목록과 섞이지 않고 이곳에서 안정적으로 확인하고 파일로 다운로드합니다.</p>
+                    </div>
+
+                    <!-- 저장 및 관리 버튼 묶음 -->
+                    <div class="flex flex-wrap items-center gap-2 shrink-0">
+                        <button onclick="exportCurrentVod('txt')" id="btnExportTxt" class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-md shadow-amber-600/20">
+                            <i data-lucide="download" class="w-4 h-4"></i> TXT로 저장
+                        </button>
+                        <button onclick="exportCurrentVod('csv')" id="btnExportCsv" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/20">
+                            <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> CSV로 저장
+                        </button>
+                        <button onclick="exportCurrentVod('json')" id="btnExportJson" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/20">
+                            <i data-lucide="file-code" class="w-4 h-4"></i> JSON으로 저장
+                        </button>
+                        <button onclick="deleteCurrentVod()" id="btnDeleteVod" class="bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-medium px-3 py-2 rounded-xl text-xs transition-all flex items-center gap-1" title="현재 선택된 VOD 복원 내역 삭제">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 삭제
+                        </button>
+                    </div>
+                </div>
+
+                <!-- VOD 선택 드롭다운 & 현재 VOD 메타데이터 정보 카드 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                    <div class="md:col-span-2 flex items-center gap-2">
+                        <label class="text-xs font-semibold text-slate-400 shrink-0">복원 내역 선택:</label>
+                        <select id="vodSelectDropdown" onchange="onSelectVodChange(this.value)" class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500">
+                            <option value="">복원된 VOD를 선택하세요...</option>
+                        </select>
+                        <button onclick="loadVodList()" class="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-all" title="목록 새로고침">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+
+                    <!-- 정렬 순서 토글 -->
+                    <div class="flex items-center justify-end gap-2">
+                        <span class="text-xs text-slate-400">정렬:</span>
+                        <button onclick="toggleVodSortOrder()" id="btnVodSort" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 border border-slate-700">
+                            <i data-lucide="arrow-down-up" class="w-3.5 h-3.5 text-amber-400"></i>
+                            <span id="vodSortLabel">시간순(과거순)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 현재 선택된 VOD 상세 배지 -->
+                <div id="vodMetaBanner" class="bg-slate-950 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <span class="text-slate-400">스트리머: <strong class="text-amber-300" id="vodMetaStreamer">-</strong></span>
+                        <span class="text-slate-400">제목: <strong class="text-white" id="vodMetaTitle">-</strong></span>
+                        <span class="text-slate-400">방송일시: <span class="text-slate-300" id="vodMetaStart">-</span></span>
+                    </div>
+                    <div class="text-slate-400">
+                        복원일시: <span class="text-slate-300" id="vodMetaImportedAt">-</span>
+                    </div>
+                </div>
+
+                <!-- VOD 전용 검색 필터 바 -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="relative">
+                        <i data-lucide="search" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="vodSearchKeyword" oninput="debounceFilterVodChats()" placeholder="복원된 채팅 내용 검색..." class="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
+                    </div>
+                    <div class="relative">
+                        <i data-lucide="user" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="vodSearchUser" oninput="debounceFilterVodChats()" placeholder="시청자 닉네임 또는 아이디 검색..." class="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
+                    </div>
+                </div>
+
+                <!-- VOD 복원 채팅 스크롤 뷰어 영역 -->
+                <div id="vodChatScrollContainer" class="chat-scroll bg-slate-950 border border-slate-800 rounded-xl p-4 h-[500px] overflow-y-auto space-y-2">
+                    <div class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
+                        <i data-lucide="history" class="w-10 h-10 text-slate-600"></i>
+                        <p class="text-sm">복원된 VOD 링크를 입력하거나 위 목록에서 선택하세요.</p>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- ==================== 탭 4: 시청자 검색 뷰 ==================== -->
