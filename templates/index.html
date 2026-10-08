@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOOP 실시간 채팅 아카이브 & 분석 대시보드</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Pretendard', sans-serif;
+        }
+        .chat-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-scroll::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .chat-scroll::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+        .chat-scroll::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+    <!-- 상단 네비게이션 헤더 -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                    <i data-lucide="message-square" class="w-5 h-5 text-white"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg text-white flex items-center gap-2">
+                        SOOP 채팅 아카이브
+                        <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">ALL-IN-ONE</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">자동 저장 · 24시간 감시 · 과거 VOD 복원 · 시청자 검색 · 통계 요약</p>
+                </div>
+            </div>
+
+            <!-- 네비게이션 탭 -->
+            <nav class="flex items-center space-x-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/50 overflow-x-auto">
+                <button onclick="switchTab('realtime')" id="tab-realtime" class="tab-btn px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-blue-600 shadow-sm flex items-center gap-1.5 shrink-0">
+                    <i data-lucide="radio" class="w-4 h-4"></i> 실시간 채팅 & 기록
+                </button>
+                <button onclick="switchTab('monitor')" id="tab-monitor" class="tab-btn px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5 shrink-0">
+                    <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i> 24시간 자동 감시
+                </button>
+                <button onclick="switchTab('vod')" id="tab-vod" class="tab-btn px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5 shrink-0">
+                    <i data-lucide="history" class="w-4 h-4 text-amber-400"></i> 과거 VOD 복원
+                </button>
+                <button onclick="switchTab('userSearch')" id="tab-userSearch" class="tab-btn px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5 shrink-0">
+                    <i data-lucide="user-search" class="w-4 h-4"></i> 시청자 검색
+                </button>
+                <button onclick="switchTab('summary')" id="tab-summary" class="tab-btn px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-1.5 shrink-0">
+                    <i data-lucide="pie-chart" class="w-4 h-4"></i> 통계 & 요약
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 메인 컨테이너 -->
+    <main class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full space-y-6">
+
+        <!-- 방송 수집 컨트롤 바 (실시간 탭 및 공통 영역) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+            <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                <div class="flex-1">
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <i data-lucide="link" class="w-3.5 h-3.5 text-blue-400"></i> SOOP 방송 링크 또는 스트리머 ID 입력
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="streamerInput" 
+                               placeholder="예: https://play.sooplive.co.kr/khm11903 또는 khm11903" 
+                               class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                        <button onclick="startRecording()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/30 flex items-center gap-2 shrink-0">
+                            <i data-lucide="play" class="w-4 h-4"></i> 즉시 수집
+                        </button>
+                        <button onclick="quickAddMonitorFromBar()" title="24시간 자동 감시 목록에도 함께 등록" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-medium px-4 py-2.5 rounded-xl text-sm transition-all flex items-center gap-1.5 shrink-0">
+                            <i data-lucide="shield-plus" class="w-4 h-4"></i> 자동 감시 등록
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 현재 수집 중인 채널 현황 카드 -->
+                <div class="border-t md:border-t-0 md:border-l border-slate-800 md:pl-5 flex items-center gap-4">
+                    <div id="channelStatusArea" class="flex items-center gap-3">
+                        <div class="w-3 h-3 rounded-full bg-slate-600" id="statusDot"></div>
+                        <div>
+                            <div class="text-xs text-slate-400">실시간 수집 상태</div>
+                            <div class="text-sm font-bold text-slate-300" id="currentStreamerText">대기 중</div>
+                        </div>
+                    </div>
+                    <button onclick="stopRecording()" id="btnStopRecord" style="display:none;" class="bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 px-3.5 py-2 rounded-xl text-xs font-medium transition-all flex items-center gap-1.5">
+                        <i data-lucide="square" class="w-3.5 h-3.5"></i> 수집 중지
+                    </button>
+                </div>
+            </div>
+
+            <!-- 등록된 채널 뱃지 목록 -->
+            <div class="mt-4 pt-4 border-t border-slate-800/60 flex items-center gap-2 overflow-x-auto pb-1" id="recordedChannelsList">
+                <span class="text-xs text-slate-500 shrink-0 font-medium">기록된 채널:</span>
+                <!-- 동적으로 배지 렌더링 -->
+            </div>
+        </div>
+
+        <!-- ==================== 탭 1: 실시간 채팅 & 기록 뷰 ==================== -->
+        <section id="section-realtime" class="tab-content block space-y-4">
+            <!-- 필터 및 검색창 바 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2 flex-1 min-w-[280px]">
+                    <div class="relative flex-1">
+                        <i data-lucide="search" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="chatSearchKeyword" onkeyup="handleRealtimeSearch(event)" placeholder="채팅 내용 검색..." 
+                               class="w-full bg-slate-950 border border-slate-700/80 rounded-lg pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="relative w-48">
+                        <i data-lucide="user" class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="chatSearchUser" onkeyup="handleRealtimeSearch(event)" placeholder="작성자 닉네임/ID..." 
+                               class="w-full bg-slate-950 border border-slate-700/80 rounded-lg pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <!-- 시간대 필터 -->
+                    <input type="datetime-local" id="filterStartTime" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded-lg text-slate-300">
+                    <span class="text-xs text-slate-500">~</span>
+                    <input type="datetime-local" id="filterEndTime" class="bg-slate-950 border border-slate-700 text-xs px-2.5 py-2 rounded-lg text-slate-300">
+                    <button onclick="loadChats(true)" class="bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 px-3 py-2 rounded-lg transition-all border border-slate-700">필터 적용</button>
+                    <button onclick="resetFilters()" class="text-xs text-slate-500 hover:text-slate-300 px-2 py-2">초기화</button>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <label class="text-xs text-slate-400 flex items-center gap-1.5 cursor-pointer select-none">
+                        <input type="checkbox" id="autoRefreshToggle" checked class="rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-0">
+                        실시간 새로고침 (2초)
+                    </label>
+                    <span id="chatTotalCounter" class="text-xs font-semibold bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-md text-blue-400">총 0개</span>
+                </div>
+            </div>
+
+            <!-- 채팅 목록 박스 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl flex flex-col h-[650px]">
+                <div class="px-5 py-3 border-b border-slate-800/80 bg-slate-900/60 flex items-center justify-between text-xs text-slate-400">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        <span id="activeChannelBadge">채널: 전체</span>
+                    </div>
+                    <span>시간순 (최신순 기록)</span>
+                </div>
+
+                <div id="chatMessageContainer" class="chat-scroll flex-1 p-4 overflow-y-auto space-y-2">
+                    <div class="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
+                        <i data-lucide="inbox" class="w-10 h-10 text-slate-600"></i>
+                        <p class="text-sm">기록된 채팅이 없습니다. 방송 링크를 입력하고 수집을 시작하세요.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 탭 2: 24시간 자동 감시 매니저 (방법 1) ==================== -->
+        <section id="section-monitor" class="tab-content hidden space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <i data-lucide="shield-check" class="w-5 h-5 text-emerald-400"></i>
+                            24/7 스트리머 상시 자동 감시 및 자동 녹화
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-1">
+                            사이트를 켜두지 않아도 백그라운드에서 방송 시작(ON-AIR) 여부를 지속 감시합니다. 방송이 켜지는 첫 초부터 자동으로 모든 채팅을 DB에 저장합니다.
+                        </p>
+                    </div>
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> 감시 데몬 실행 중 (20초 주기 체크)
+                    </span>
+                </div>
+
+                <!-- 감시 대상 등록 폼 -->
+                <div class="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-3">
+                    <div class="relative flex-1 w-full">
+                        <i data-lucide="user-plus" class="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="monitorInput" placeholder="감시할 스트리머 ID 또는 채널 링크 입력 (예: khm11903)"
+                               class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <label class="text-xs text-slate-300 flex items-center gap-2 cursor-pointer select-none shrink-0">
+                        <input type="checkbox" id="monitorAutoRecordCheck" checked class="rounded bg-slate-800 border-slate-700 text-emerald-600 focus:ring-0">
+                        방송 켜지면 자동 녹화
+                    </label>
+                    <button onclick="addMonitoredStreamer()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 shrink-0">
+                        <i data-lucide="plus" class="w-4 h-4"></i> 감시 등록
+                    </button>
+                </div>
+            </div>
+
+            <!-- 감시 대상 목록 카드 리스트 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                <div class="flex items-center justify-between">
+                    <h4 class="text-sm font-bold text-white flex items-center gap-2">
+                        <i data-lucide="list" class="w-4 h-4 text-emerald-400"></i>
+                        등록된 감시 스트리머 목록
+                    </h4>
+                    <button onclick="loadMonitoredStreamers()" class="text-xs text-slate-400 hover:text-white flex items-center gap-1">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 새로고침
+                    </button>
+                </div>
+
+                <div id="monitoredListContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="col-span-full py-12 text-center text-slate-500 text-sm">등록된 감시 스트리머가 없습니다.</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 탭 3: 과거 VOD 채팅 복원 (방법 2) ==================== -->
+        <section id="section-vod" class="tab-content hidden space-y-6">
+            <!-- VOD URL 복원 카드 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                        <i data-lucide="history" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-white">과거 다시보기(VOD) 채팅 복원 및 가져오기</h3>
+                        <p class="text-xs text-slate-400">방송이 끝난 뒤에도 언제든지 SOOP 다시보기 링크를 입력하면 수만 건의 과거 채팅을 초고속으로 복원하여 DB에 저장합니다.</p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <label class="block text-xs font-semibold text-slate-400">SOOP 다시보기(VOD) 주소 또는 VOD 번호 입력</label>
+                    <div class="flex flex-col sm:flex-row items-center gap-2">
+                        <input type="text" id="vodUrlInput" 
+                               placeholder="예: https://vod.sooplive.com/player/209273485 또는 209273485" 
+                               class="flex-1 w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500">
+                        <button onclick="importVodChat()" id="btnImportVod" class="w-full sm:w-auto bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-amber-600/30 flex items-center justify-center gap-2 shrink-0">
+                            <i data-lucide="download" class="w-4 h-4"></i> 과거 채팅 복원하기
+                        </button>
+                    </div>
+                    <div class="text-[11px] text-slate-500 flex items-center gap-1.5">
+                        <i data-lucide="info" class="w-3.5 h-3.5 text-amber-400"></i>
+                        복원된 채팅은 '실시간 채팅', '시청자 검색', '통계 및 요약'에서 실시간 채팅과 동일하게 분석됩니다.
+                    </div>
+                </div>
+
+                <!-- VOD 결과 표시 알림 영역 -->
+                <div id="vodResultBox" class="hidden bg-slate-950 border border-emerald-500/30 rounded-xl p-4">
+                    <div class="flex items-start gap-3">
+                        <i data-lucide="check-circle" class="w-5 h-5 text-emerald-400 shrink-0 mt-0.5"></i>
+                        <div>
+                            <div class="text-sm font-bold text-emerald-400" id="vodResultTitle">복원 완료</div>
+                            <p class="text-xs text-slate-300 mt-1" id="vodResultDesc"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 파일 업로드 복원 카드 (추가 보완 옵션) -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center">
+                        <i data-lucide="file-text" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-base font-bold text-white">채팅 로그 파일 직접 업로드 (.txt / .csv)</h4>
+                        <p class="text-xs text-slate-400">크롬 확장 프로그램이나 다운로더로 저장된 텍스트/CSV 채팅 파일을 업로드하여 DB로 가져옵니다.</p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-3">
+                    <input type="file" id="chatFileInput" accept=".txt,.csv" class="flex-1 text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-500 cursor-pointer">
+                    <input type="text" id="chatFileStreamerId" placeholder="스트리머 ID (선택)" class="bg-slate-900 border border-slate-700 text-xs px-3 py-2 rounded-xl text-white w-full sm:w-44">
+                    <button onclick="uploadChatLogFile()" class="w-full sm:w-auto bg-purple-600 hover:bg-purple-500 text-white font-semibold px-5 py-2 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 shrink-0">
+                        <i data-lucide="upload" class="w-3.5 h-3.5"></i> 파일 가져오기
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 탭 4: 시청자 검색 뷰 ==================== -->
+        <section id="section-userSearch" class="tab-content hidden space-y-4">
+            <!-- 시청자 검색 입력 영역 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <h3 class="text-base font-bold text-white mb-2 flex items-center gap-2">
+                    <i data-lucide="user-check" class="w-5 h-5 text-indigo-400"></i> 시청자 닉네임 또는 아이디 검색
+                </h3>
+                <p class="text-xs text-slate-400 mb-4">시청자의 아이디나 닉네임의 일부만 입력해도 해당 유저가 지금까지 남긴 모든 채팅 기록을 찾아냅니다.</p>
+
+                <div class="flex items-center gap-2 max-w-2xl">
+                    <div class="relative flex-1">
+                        <i data-lucide="search" class="w-5 h-5 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="targetUserQuery" onkeydown="if(event.key==='Enter') searchTargetUser()" 
+                               placeholder="시청자 닉네임 또는 ID 입력 (예: 철수, khm11903 등)" 
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl pl-11 pr-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                    </div>
+                    <button onclick="searchTargetUser()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2">
+                        <i data-lucide="search" class="w-4 h-4"></i> 검색
+                    </button>
+                </div>
+            </div>
+
+            <!-- 시청자 검색 결과 및 프로필 요약 -->
+            <div id="userSearchResultsArea" class="space-y-4" style="display:none;">
+                <!-- 유저 프로필 카드 리스트 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="userProfilesCardList">
+                    <!-- 동적 카드 -->
+                </div>
+
+                <!-- 해당 유저가 작성한 채팅 내역 리스트 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl flex flex-col">
+                    <div class="px-5 py-3.5 border-b border-slate-800 bg-slate-900/80 flex items-center justify-between">
+                        <h4 class="text-sm font-bold text-white flex items-center gap-2">
+                            <i data-lucide="list" class="w-4 h-4 text-indigo-400"></i>
+                            <span id="userChatListTitle">작성한 채팅 내역</span>
+                        </h4>
+                        <span id="userChatCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 font-semibold">총 0건</span>
+                    </div>
+
+                    <div id="userChatHistoryContainer" class="p-4 space-y-2 max-h-[550px] overflow-y-auto chat-scroll">
+                        <!-- 동적 채팅 목록 -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 탭 5: 채팅 분석 & 요약 뷰 ==================== -->
+        <section id="section-summary" class="tab-content hidden space-y-6">
+            <!-- ==================== 스마트 채팅 내용 종합 요약 브리핑 카드 ==================== -->
+            <div class="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/40 border border-slate-700/80 rounded-2xl p-6 shadow-2xl space-y-6">
+                <!-- 헤더 컨트롤 -->
+                <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/25">
+                            <i data-lucide="sparkles" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-base font-bold text-white">전체 방송 채팅 내용 정밀 요약</h3>
+                                <span id="summaryChannelBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-medium">전체 방송 종합</span>
+                            </div>
+                            <p class="text-xs text-slate-400" id="summaryHeaderSub">방송 전체 대화 흐름, 분위기, 화력 폭발 하이라이트 분석 브리핑</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="copySummaryText()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all flex items-center gap-1.5">
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i> 요약문 복사
+                        </button>
+                        <button onclick="loadSummary()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-all flex items-center gap-1.5 shadow-md shadow-blue-500/20">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 요약 새로고침
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 1. 종합 자연어 브리핑 본문 -->
+                <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-5 relative overflow-hidden">
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <h4 class="text-xs font-bold text-emerald-400 tracking-wider uppercase">Executive Summary · 종합 브리핑</h4>
+                    </div>
+                    <div id="summaryNarrativeText" class="text-sm text-slate-200 leading-relaxed space-y-3 whitespace-pre-line font-normal">
+                        채팅 데이터를 분석 중입니다...
+                    </div>
+                </div>
+
+                <!-- 2. 감정 분위기 & 최다 빈출 한마디 그리드 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- 감정/반응 지수 -->
+                    <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4">
+                        <h5 class="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-3">
+                            <i data-lucide="activity" class="w-4 h-4 text-amber-400"></i> 시청자 반응 & 분위기 분석
+                        </h5>
+                        <div class="space-y-2.5" id="moodStatsContainer">
+                            <!-- 동적 렌더링 -->
+                        </div>
+                    </div>
+
+                    <!-- 최다 빈출 한마디 -->
+                    <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between">
+                        <div>
+                            <h5 class="text-xs font-bold text-slate-300 flex items-center gap-1.5 mb-3">
+                                <i data-lucide="message-circle" class="w-4 h-4 text-indigo-400"></i> 시청자 최다 빈출 한마디 TOP 5 (도배/유행어)
+                            </h5>
+                            <div class="space-y-1.5" id="topPhrasesContainer">
+                                <!-- 동적 렌더링 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 시간대별 화력 폭발 하이라이트 타임라인 -->
+                <div class="space-y-3">
+                    <h5 class="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                        <i data-lucide="flame" class="w-4 h-4 text-rose-400"></i> 주요 장면 화력 폭발 하이라이트 타임라인
+                    </h5>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3" id="highlightsTimelineGrid">
+                        <!-- 동적 카드 렌더링 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 요약 헤더 및 통계 카드 -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-400">총 기록된 채팅 수</span>
+                        <div class="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center">
+                            <i data-lucide="message-square" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                    <div class="text-2xl font-bold text-white mt-2" id="statTotalChats">0</div>
+                    <div class="text-xs text-slate-500 mt-1" id="statTimeRange">기간: 수집 중</div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-400">참여 시청자 수</span>
+                        <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                            <i data-lucide="users" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                    <div class="text-2xl font-bold text-white mt-2" id="statTotalUsers">0명</div>
+                    <div class="text-xs text-emerald-400/80 mt-1">고유 닉네임 기준</div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-400">웃음(ㅋ) 화력</span>
+                        <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                            <i data-lucide="smile" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                    <div class="text-2xl font-bold text-amber-400 mt-2" id="statLaughterCount">0회</div>
+                    <div class="text-xs text-slate-500 mt-1">채팅 분위기 지수</div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-slate-400">질문(?) 반응</span>
+                        <div class="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+                            <i data-lucide="help-circle" class="w-4 h-4"></i>
+                        </div>
+                    </div>
+                    <div class="text-2xl font-bold text-purple-400 mt-2" id="statQuestionCount">0회</div>
+                    <div class="text-xs text-slate-500 mt-1">소통 & 궁금증 빈도</div>
+                </div>
+            </div>
+
+            <!-- 타임라인 그래프 & 키워드 분석 -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 시간대별 채팅 빈도 그래프 (2/3) -->
+                <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col">
+                    <div class="flex items-center justify-between mb-4">
+                        <h4 class="text-sm font-bold text-white flex items-center gap-2">
+                            <i data-lucide="trending-up" class="w-4 h-4 text-blue-400"></i> 시간대별 채팅량 추이 (화력 타임라인)
+                        </h4>
+                        <span class="text-xs text-slate-500">분 단위 집계</span>
+                    </div>
+                    <div class="flex-1 min-h-[300px] relative">
+                        <canvas id="timelineChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 주요 자주 나온 키워드 TOP 20 (1/3) -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col">
+                    <h4 class="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                        <i data-lucide="flame" class="w-4 h-4 text-rose-400"></i> 인기 키워드 TOP 20
+                    </h4>
+                    <div class="flex-1 overflow-y-auto chat-scroll space-y-2 pr-1" id="keywordListContainer">
+                        <!-- 동적 키워드 뱃지 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 채팅왕 TOP 시청자 랭킹 -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                <h4 class="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                    <i data-lucide="crown" class="w-4 h-4 text-amber-400"></i> 가장 말을 많이 한 채팅왕 TOP 10
+                </h4>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3" id="topChattersGrid">
+                    <!-- 동적 카드 -->
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 채널 추가 모달 -->
+    <div id="addChannelModal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+            <button onclick="closeAddChannelModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                    <i data-lucide="tv" class="w-5 h-5"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white">채널 추가</h3>
+                    <p class="text-xs text-slate-400">스트리머 ID 또는 채널 링크를 입력하여 등록합니다.</p>
+                </div>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 mb-1.5">스트리머 ID 또는 방송 링크</label>
+                    <input type="text" id="addChannelInput" onkeyup="handleAddChannelEnter(event)" placeholder="예: khm11903 또는 https://ch.sooplive.co.kr/khm11903"
+                        class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+                    <p class="text-[11px] text-slate-500 mt-1.5">※ 방송 중이 아니어도 방송국 정보로 자동 등록됩니다.</p>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button onclick="closeAddChannelModal()" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:bg-slate-800 transition-all">취소</button>
+                    <button onclick="submitAddChannel()" class="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all flex items-center gap-1.5 shadow-lg shadow-blue-500/25">
+                        <i data-lucide="plus" class="w-4 h-4"></i> 채널 등록
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 커스텀 JS 파일 로드 -->
+    <script src="/static/app.js"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
